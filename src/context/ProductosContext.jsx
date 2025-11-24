@@ -116,6 +116,10 @@ export function ProductosProvider({ children }) {
   const cambiarCantidad = (id, cantidad) => 
     setCarrito(prev => prev.map(i => i.id === id ? { ...i, cantidad } : i));
 
+  const limpiarCarrito = () => {
+    setCarrito([]);
+  };
+
   // ----- FUNCIONES DE GUARDADOS -----
   const guardarParaDespues = (id) => {
     const item = carrito.find(i => i.id === id);
@@ -141,7 +145,7 @@ export function ProductosProvider({ children }) {
     <ProductosContext.Provider value={{
       productos: productosConDescuento,
       agregarProducto, eliminarProducto, actualizarProducto, toggleActivo,
-      carrito, agregarAlCarrito, quitarDelCarrito, cambiarCantidad,
+      carrito, agregarAlCarrito, quitarDelCarrito, cambiarCantidad,limpiarCarrito,
       guardados, guardarParaDespues, regresarAlCarrito, eliminarGuardado,
       categorias, agregarCategoria
     }}>
