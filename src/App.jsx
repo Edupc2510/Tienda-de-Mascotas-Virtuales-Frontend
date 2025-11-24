@@ -28,6 +28,7 @@ import NotFound from './paginas/NotFound';
 import Pomodoro from './paginas/Pomodoro';
 import Shimeji from './paginas/Shimejis';
 import StillWorking from './paginas/StillWorking';
+import ProtectedRoute from './componentes/ProtectedRoute';
 
 export default function App() {
   const location = useLocation();
@@ -57,11 +58,11 @@ export default function App() {
           <Route path="/cambiar-password" element={<CambiarPassword />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/productos" element={<AdminProductos />} />
-          <Route path="/admin/usuarios" element={<AdminUsuarios />} />
-          <Route path="/admin/categorias" element={<Categorias />} />
-          <Route path="/admin/ordenes" element={<AdminOrdenes />} />
+          <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/productos" element={<ProtectedRoute><AdminProductos /></ProtectedRoute>} />
+          <Route path="/admin/usuarios" element={<ProtectedRoute><AdminUsuarios /></ProtectedRoute>} />
+          <Route path="/admin/categorias" element={<ProtectedRoute><Categorias /></ProtectedRoute>} />
+          <Route path="/admin/ordenes" element={<ProtectedRoute><AdminOrdenes /></ProtectedRoute>} />
 
           <Route path="/pomodoro" element={<Pomodoro />} />
           <Route path="/shimejis" element={<Shimeji />} />
