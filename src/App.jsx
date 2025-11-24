@@ -23,6 +23,7 @@ import AdminDashboard from './paginas/admin/AdminDashboard';
 import AdminProductos from './paginas/admin/AdminProductos';
 import AdminUsuarios from './paginas/admin/AdminUsuarios';
 import Categorias from './paginas/admin/Categorias';
+import AdminOrdenes from './paginas/admin/AdminOrdenes';
 import NotFound from './paginas/NotFound';
 import Pomodoro from './paginas/Pomodoro';
 import Shimeji from './paginas/Shimejis';
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/admin/productos" element={<AdminProductos />} />
           <Route path="/admin/usuarios" element={<AdminUsuarios />} />
           <Route path="/admin/categorias" element={<Categorias />} />
+          <Route path="/admin/ordenes" element={<AdminOrdenes />} />
 
           <Route path="/pomodoro" element={<Pomodoro />} />
           <Route path="/shimejis" element={<Shimeji />} />
