@@ -8,7 +8,7 @@ module.exports = {
         id: 0,
         nombre: 'Admin',
         apellido: 'Principal',
-        email: 'admin@local.com',
+        email: 'admin@local',
         password: 'admin',  // Ojo: SIN hashear, si usas bcrypt deberías hashearlo antes
         role: 'admin',
         activo: true,
