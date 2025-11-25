@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useUsuarios } from "../context/UsuariosContext";
-import "./forgotPassword.css";
+import "./ForgotPassword.css";
 
 export default function ForgotPassword() {
   const [correo, setCorreo] = useState("");
