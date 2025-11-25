@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useUsuarios } from "../context/UsuariosContext";
-import "./login.css";
+import "./Login.css";
 
 export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
