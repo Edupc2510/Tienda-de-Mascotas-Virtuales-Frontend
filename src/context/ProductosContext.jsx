@@ -10,6 +10,7 @@ export const useProductos = () => {
 };
 
 const API_URL = "https://kozzyserverapi.azurewebsites.net";
+const CART_KEY = "carrito";
 
 export function ProductosProvider({ children }) {
   const [productos, setProductos] = useState([]);
@@ -17,14 +18,38 @@ export function ProductosProvider({ children }) {
   const [errorProductos, setErrorProductos] = useState(null);
 
   const [carrito, setCarrito] = useState(() => {
-    const stored = localStorage.getItem("carrito");
-    return stored ? JSON.parse(stored) : [];
+    try {
+      const stored = localStorage.getItem(CART_KEY);
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   });
 
   // Persistir carrito
   useEffect(() => {
-    localStorage.setItem("carrito", JSON.stringify(carrito));
+    try {
+      localStorage.setItem(CART_KEY, JSON.stringify(carrito));
+    } catch (e) {
+      console.error("No se pudo guardar carrito en localStorage:", e);
+    }
   }, [carrito]);
+
+  // Sync entre tabs (opcional, pero evita “revivir” cosas raras)
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== CART_KEY) return;
+      try {
+        const next = e.newValue ? JSON.parse(e.newValue) : [];
+        setCarrito(Array.isArray(next) ? next : []);
+      } catch {
+        setCarrito([]);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Cargar productos
   useEffect(() => {
@@ -56,10 +81,9 @@ export function ProductosProvider({ children }) {
     return Array.from(set);
   }, [productos]);
 
-  // ✅ función real
   const addToCarrito = (producto, cantidad = 1) => {
     if (!producto?.id) return;
-    const qty = Number(cantidad || 1);
+    const qty = Math.max(1, Number(cantidad || 1));
 
     setCarrito((prev) => {
       const idx = prev.findIndex((x) => x.id === producto.id);
@@ -72,7 +96,7 @@ export function ProductosProvider({ children }) {
     });
   };
 
-  // ✅ alias para que tu front antiguo siga funcionando
+  // alias (compatibilidad con tu front)
   const agregarAlCarrito = addToCarrito;
 
   const quitarDelCarrito = (id) => {
@@ -86,7 +110,20 @@ export function ProductosProvider({ children }) {
     );
   };
 
-  const vaciarCarrito = () => setCarrito([]);
+  // ✅ este es el que tu Checkout llama
+  const limpiarCarrito = () => {
+    setCarrito([]);
+    try {
+      localStorage.removeItem(CART_KEY);
+      // por si acaso, dejarlo explícitamente vacío también:
+      localStorage.setItem(CART_KEY, JSON.stringify([]));
+    } catch (e) {
+      console.error("No se pudo limpiar carrito en localStorage:", e);
+    }
+  };
+
+  // por si en otros lados lo llamas así
+  const vaciarCarrito = limpiarCarrito;
 
   return (
     <ProductosContext.Provider
@@ -98,12 +135,13 @@ export function ProductosProvider({ children }) {
 
         carrito,
 
-        // exports
         addToCarrito,
-        agregarAlCarrito, // 👈 importante para tu DetalleProducto.jsx
+        agregarAlCarrito,
         quitarDelCarrito,
         cambiarCantidad,
-        vaciarCarrito,
+
+        limpiarCarrito, // 👈 IMPORTANTE para tu Checkout
+        vaciarCarrito,  // alias
 
         categorias,
       }}
