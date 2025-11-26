@@ -56,6 +56,7 @@ export function ProductosProvider({ children }) {
     return Array.from(set);
   }, [productos]);
 
+  // ✅ función real
   const addToCarrito = (producto, cantidad = 1) => {
     if (!producto?.id) return;
     const qty = Number(cantidad || 1);
@@ -70,6 +71,9 @@ export function ProductosProvider({ children }) {
       return [...prev, { ...producto, cantidad: qty }];
     });
   };
+
+  // ✅ alias para que tu front antiguo siga funcionando
+  const agregarAlCarrito = addToCarrito;
 
   const quitarDelCarrito = (id) => {
     setCarrito((prev) => prev.filter((x) => x.id !== id));
@@ -93,7 +97,10 @@ export function ProductosProvider({ children }) {
         errorProductos,
 
         carrito,
+
+        // exports
         addToCarrito,
+        agregarAlCarrito, // 👈 importante para tu DetalleProducto.jsx
         quitarDelCarrito,
         cambiarCantidad,
         vaciarCarrito,
