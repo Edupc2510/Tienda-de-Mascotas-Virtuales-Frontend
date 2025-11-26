@@ -38,13 +38,13 @@ export function UsuariosProvider({ children }) {
         setUsuarios(dataU || []);
 
         // Órdenes (solo si hay usuario logueado)
-        if (usuarioLogueado) {
-          const resO = await fetch(
-            `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`
-          );
+        if (usuarioLogueado?.id) {
+          const resO = await fetch(`${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`);
           if (!resO.ok) throw new Error("Error al cargar órdenes");
           const dataO = await resO.json();
           setOrdenes(dataO || []);
+        } else {
+          setOrdenes([]);
         }
       } catch (err) {
         console.error(err);
@@ -55,7 +55,7 @@ export function UsuariosProvider({ children }) {
     };
 
     fetchInicial();
-  }, [usuarioLogueado]);
+  }, [usuarioLogueado?.id]);
 
   // ==========================
   // REGISTRO
@@ -122,14 +122,13 @@ export function UsuariosProvider({ children }) {
     const publicUser = await res.json();
     setUsuarioLogueado(publicUser);
     localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
-
     return publicUser;
   };
 
   const logout = () => {
     setUsuarioLogueado(null);
     localStorage.removeItem("usuarioLogueado");
-    setOrdenes([]); // limpiar órdenes al cerrar sesión
+    setOrdenes([]);
   };
 
   // ==========================
@@ -156,7 +155,7 @@ export function UsuariosProvider({ children }) {
     );
 
   // ==========================
-  // CREAR ORDEN (POST REAL)
+  // CREAR ORDEN (POST)
   // ==========================
   const addOrder = async (order) => {
     if (!usuarioLogueado) throw new Error("No has iniciado sesión");
@@ -183,11 +182,12 @@ export function UsuariosProvider({ children }) {
   };
 
   // ==========================
-  // CANCELAR ORDEN
+  // CANCELAR ORDEN (usa DELETE /ordenes/:id)
+  // Asumimos que tu backend NO borra físico, sino que setea estado=Cancelado
   // ==========================
   const cancelOrder = async (id) => {
-    const res = await fetch(`${API_URL}/ordenes/${id}/cancelar`, {
-      method: "PUT",
+    const res = await fetch(`${API_URL}/ordenes/${id}`, {
+      method: "DELETE",
     });
 
     if (!res.ok) {
@@ -195,10 +195,20 @@ export function UsuariosProvider({ children }) {
       throw new Error(errData.error || "Error al cancelar orden");
     }
 
-    const actualizada = await res.json();
+    // Tu backend puede devolver:
+    // A) { mensaje: "Orden eliminada" }  (tu delete actual)
+    // B) la orden actualizada
+    const data = await res.json().catch(() => ({}));
+
     setOrdenes((prev) =>
-      prev.map((o) => (o.id === id ? actualizada : o))
+      prev.map((o) =>
+        o.id === id
+          ? (typeof data === "object" && data?.id ? data : { ...o, estado: "Cancelado" })
+          : o
+      )
     );
+
+    return data;
   };
 
   // ==========================
