@@ -14,27 +14,35 @@ export default function Register() {
   const navigate = useNavigate();
   const { register } = useUsuarios();
 
+  // ✅ valida "algo@algo.algo" (ej: m@m.com, a@b.pe, x@y.edu.pe)
+  const validarCorreo = (correo) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo);
+
   const handleSubmit = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!form.nombre || !form.apellido || !form.email || !form.password) {
-    alert("Por favor completa todos los campos.");
-    return;
-  }
+    if (!form.nombre || !form.apellido || !form.email || !form.password) {
+      alert("Por favor completa todos los campos.");
+      return;
+    }
 
-  try {
-    await register({
-      nombre: form.nombre.trim(),
-      apellido: form.apellido.trim(),
-      email: form.email.trim(),
-      password: form.password,
-    });
-    alert("¡Registro exitoso! Has sido logueado.");
-    setForm({ nombre: "", apellido: "", email: "", password: "" });
-    navigate("/mi-cuenta");
-  } catch (err) {
-    alert(err.message || "Error al registrarse");
-  }
+    if (!validarCorreo(form.email.trim())) {
+      alert("Por favor ingresa un correo válido (ej: algo@algo.com).");
+      return;
+    }
+
+    try {
+      await register({
+        nombre: form.nombre.trim(),
+        apellido: form.apellido.trim(),
+        email: form.email.trim(),
+        password: form.password,
+      });
+      alert("¡Registro exitoso! Has sido logueado.");
+      setForm({ nombre: "", apellido: "", email: "", password: "" });
+      navigate("/mi-cuenta");
+    } catch (err) {
+      alert(err.message || "Error al registrarse");
+    }
   };
 
   return (
