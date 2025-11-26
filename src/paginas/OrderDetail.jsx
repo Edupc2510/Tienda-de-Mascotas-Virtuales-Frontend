@@ -21,13 +21,15 @@ export default function OrderDetail() {
       try {
         setCargando(true);
         setError(null);
+
         const res = await fetch(`${API_URL}/ordenes/${id}`);
         if (!res.ok) throw new Error("Orden no encontrada");
+
         const data = await res.json();
         setOrden(data);
       } catch (err) {
         console.error(err);
-        setError(err.message);
+        setError(err.message || "Error cargando la orden");
       } finally {
         setCargando(false);
       }
@@ -55,31 +57,59 @@ export default function OrderDetail() {
     }
   };
 
-  // Items a mostrar: preferimos detalle (porque trae producto con nombre)
+  // Resolver nombres aunque el backend NO mande detalle.producto:
+  // - Si hay detalle con producto, perfecto
+  // - Si no, usamos orden.productos para mapear por id
+  // - Si nada, caemos a "Producto #id"
   const itemsParaMostrar = useMemo(() => {
     if (!orden) return [];
+
+    const productosById = Object.fromEntries(
+      (orden.productos || []).map((p) => [Number(p.id), p])
+    );
+
+    // Preferimos: detalle (OrdProds)
     if (Array.isArray(orden.detalle) && orden.detalle.length > 0) {
-      // detalle: [{ productoId, cantidad, precioUnitario, producto: {...} }, ...]
-      return orden.detalle.map((d) => ({
-        key: `${d.ordenId}-${d.productoId}`,
-        nombre: d.producto?.nombre ?? `Producto #${d.productoId}`,
-        cantidad: Number(d.cantidad ?? 1),
-        precioUnitario: Number(d.precioUnitario ?? 0),
-        // por si quieres imagen luego:
-        imagen: d.producto?.imagen ?? d.producto?.image ?? null,
-      }));
+      return orden.detalle.map((d, idx) => {
+        const productoId = Number(d.productoId);
+        const producto =
+          d.producto ?? productosById[productoId] ?? null;
+
+        const cantidad = Number(d.cantidad ?? 1);
+        const precioUnitario = Number(d.precioUnitario ?? 0);
+
+        return {
+          key: d.id ?? `${d.ordenId ?? orden.id}-${productoId}-${idx}`,
+          productoId,
+          nombre: producto?.nombre ?? `Producto #${productoId}`,
+          cantidad,
+          precioUnitario,
+          imagen: producto?.imagen ?? producto?.image ?? null,
+        };
+      });
     }
 
-    // fallback: items normalizados (productoId, cantidad, precio)
-    return (orden.items || []).map((it, idx) => ({
-      key: it.id ?? `${it.productoId ?? it.id}-${idx}`,
-      nombre:
-        it.nombre ??
-        (it.productoId || it.id ? `Producto #${it.productoId ?? it.id}` : "Producto"),
-      cantidad: Number(it.cantidad ?? 1),
-      precioUnitario: Number(it.precio ?? it.precioUnitario ?? 0),
-      imagen: it.imagen ?? it.image ?? null,
-    }));
+    // Fallback: orden.items (JSON)
+    return (orden.items || []).map((it, idx) => {
+      const productoId = Number(it.productoId ?? it.id);
+      const producto = productosById[productoId] ?? null;
+
+      const cantidad = Number(it.cantidad ?? 1);
+      const precioUnitario = Number(it.precio ?? it.precioUnitario ?? 0);
+
+      return {
+        key: `${productoId || "item"}-${idx}`,
+        productoId: productoId || null,
+        nombre:
+          it.nombre ??
+          producto?.nombre ??
+          (productoId ? `Producto #${productoId}` : "Producto"),
+        cantidad,
+        precioUnitario,
+        imagen:
+          it.imagen ?? it.image ?? producto?.imagen ?? producto?.image ?? null,
+      };
+    });
   }, [orden]);
 
   if (cargando) {
@@ -105,13 +135,16 @@ export default function OrderDetail() {
   return (
     <section className="order-detail card">
       <h1>📦 Detalle de la orden #{orden.id}</h1>
+
       <p>
         <strong>Fecha:</strong>{" "}
         {new Date(orden.createdAt || orden.fecha).toLocaleString()}
       </p>
+
       <p>
         <strong>Estado:</strong> {orden.estado}
       </p>
+
       <p>
         <strong>Total:</strong> S/ {Number(orden.total ?? 0).toFixed(2)}
       </p>
@@ -132,13 +165,13 @@ export default function OrderDetail() {
 
       <h3>🚚 Envío</h3>
       <p>
-        <strong>Nombre:</strong> {orden.envio?.nombre}
+        <strong>Nombre:</strong> {orden.envio?.nombre ?? "-"}
       </p>
       <p>
-        <strong>Dirección:</strong> {orden.envio?.direccion}
+        <strong>Dirección:</strong> {orden.envio?.direccion ?? "-"}
       </p>
       <p>
-        <strong>Ciudad:</strong> {orden.envio?.ciudad}
+        <strong>Ciudad:</strong> {orden.envio?.ciudad ?? "-"}
       </p>
       <p>
         <strong>Método:</strong>{" "}
