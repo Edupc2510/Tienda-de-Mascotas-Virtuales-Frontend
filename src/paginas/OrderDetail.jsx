@@ -1,5 +1,5 @@
 // src/paginas/OrderDetail.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useUsuarios } from "../context/UsuariosContext";
 import "./OrderDetail.css";
@@ -55,6 +55,33 @@ export default function OrderDetail() {
     }
   };
 
+  // Items a mostrar: preferimos detalle (porque trae producto con nombre)
+  const itemsParaMostrar = useMemo(() => {
+    if (!orden) return [];
+    if (Array.isArray(orden.detalle) && orden.detalle.length > 0) {
+      // detalle: [{ productoId, cantidad, precioUnitario, producto: {...} }, ...]
+      return orden.detalle.map((d) => ({
+        key: `${d.ordenId}-${d.productoId}`,
+        nombre: d.producto?.nombre ?? `Producto #${d.productoId}`,
+        cantidad: Number(d.cantidad ?? 1),
+        precioUnitario: Number(d.precioUnitario ?? 0),
+        // por si quieres imagen luego:
+        imagen: d.producto?.imagen ?? d.producto?.image ?? null,
+      }));
+    }
+
+    // fallback: items normalizados (productoId, cantidad, precio)
+    return (orden.items || []).map((it, idx) => ({
+      key: it.id ?? `${it.productoId ?? it.id}-${idx}`,
+      nombre:
+        it.nombre ??
+        (it.productoId || it.id ? `Producto #${it.productoId ?? it.id}` : "Producto"),
+      cantidad: Number(it.cantidad ?? 1),
+      precioUnitario: Number(it.precio ?? it.precioUnitario ?? 0),
+      imagen: it.imagen ?? it.image ?? null,
+    }));
+  }, [orden]);
+
   if (cargando) {
     return (
       <section className="order-detail card">
@@ -78,27 +105,51 @@ export default function OrderDetail() {
   return (
     <section className="order-detail card">
       <h1>📦 Detalle de la orden #{orden.id}</h1>
-      <p><strong>Fecha:</strong> {new Date(orden.createdAt || orden.fecha).toLocaleString()}</p>
-      <p><strong>Estado:</strong> {orden.estado}</p>
-      <p><strong>Total:</strong> S/ {orden.total}</p>
+      <p>
+        <strong>Fecha:</strong>{" "}
+        {new Date(orden.createdAt || orden.fecha).toLocaleString()}
+      </p>
+      <p>
+        <strong>Estado:</strong> {orden.estado}
+      </p>
+      <p>
+        <strong>Total:</strong> S/ {Number(orden.total ?? 0).toFixed(2)}
+      </p>
 
       <h3>🛒 Productos</h3>
       <ul className="order-items">
-        {(orden.items || []).map((it) => (
-          <li key={it.id}>
-            {it.nombre} x{it.cantidad} — S/ {(it.precio * it.cantidad).toFixed(2)}
-          </li>
-        ))}
+        {itemsParaMostrar.length === 0 ? (
+          <li>No hay productos en esta orden.</li>
+        ) : (
+          itemsParaMostrar.map((it) => (
+            <li key={it.key}>
+              {it.nombre} x{it.cantidad} — S/{" "}
+              {(it.precioUnitario * it.cantidad).toFixed(2)}
+            </li>
+          ))
+        )}
       </ul>
 
       <h3>🚚 Envío</h3>
-      <p><strong>Nombre:</strong> {orden.envio?.nombre}</p>
-      <p><strong>Dirección:</strong> {orden.envio?.direccion}</p>
-      <p><strong>Ciudad:</strong> {orden.envio?.ciudad}</p>
-      <p><strong>Método:</strong> {orden.envio?.metodo === "tienda" ? "Recoger en tienda" : "Delivery"}</p>
+      <p>
+        <strong>Nombre:</strong> {orden.envio?.nombre}
+      </p>
+      <p>
+        <strong>Dirección:</strong> {orden.envio?.direccion}
+      </p>
+      <p>
+        <strong>Ciudad:</strong> {orden.envio?.ciudad}
+      </p>
+      <p>
+        <strong>Método:</strong>{" "}
+        {orden.envio?.metodo === "tienda" ? "Recoger en tienda" : "Delivery"}
+      </p>
 
       <h3>💳 Pago</h3>
-      <p><strong>Método:</strong> {orden.pago?.metodo === "tarjeta" ? "Tarjeta" : "Código QR"}</p>
+      <p>
+        <strong>Método:</strong>{" "}
+        {orden.pago?.metodo === "tarjeta" ? "Tarjeta" : "Código QR"}
+      </p>
 
       <div className="order-actions">
         <button onClick={() => navigate("/mi-cuenta")} className="btn volver">
@@ -114,4 +165,3 @@ export default function OrderDetail() {
     </section>
   );
 }
-
