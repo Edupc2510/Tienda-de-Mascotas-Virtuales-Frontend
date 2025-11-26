@@ -14,29 +14,38 @@ const API_URL = "https://kozzyserverapi.azurewebsites.net";
 export function UsuariosProvider({ children }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuarioLogueado, setUsuarioLogueado] = useState(() => {
-    const stored = localStorage.getItem('usuarioLogueado');
+    const stored = localStorage.getItem("usuarioLogueado");
     return stored ? JSON.parse(stored) : null;
   });
+
   const [ordenes, setOrdenes] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
-  // Cargar usuarios y órdenes
+  // ==========================
+  // CARGAR USUARIOS Y ÓRDENES
+  // ==========================
   useEffect(() => {
     const fetchInicial = async () => {
       try {
         setCargando(true);
         setError(null);
 
+        // Usuarios
         const resU = await fetch(`${API_URL}/usuarios`);
         if (!resU.ok) throw new Error("Error al cargar usuarios");
         const dataU = await resU.json();
         setUsuarios(dataU || []);
 
-        const resO = await fetch(`${API_URL}/ordenes`);
-        if (!resO.ok) throw new Error("Error al cargar órdenes");
-        const dataO = await resO.json();
-        setOrdenes(dataO || []);
+        // Órdenes (solo si hay usuario logueado)
+        if (usuarioLogueado) {
+          const resO = await fetch(
+            `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`
+          );
+          if (!resO.ok) throw new Error("Error al cargar órdenes");
+          const dataO = await resO.json();
+          setOrdenes(dataO || []);
+        }
       } catch (err) {
         console.error(err);
         setError(err.message);
@@ -46,7 +55,7 @@ export function UsuariosProvider({ children }) {
     };
 
     fetchInicial();
-  }, []);
+  }, [usuarioLogueado]);
 
   // ==========================
   // REGISTRO
@@ -54,10 +63,19 @@ export function UsuariosProvider({ children }) {
   const register = async ({ nombre = "", apellido = "", email, password }) => {
     if (!email || !password) throw new Error("Faltan datos");
 
-    const exists = usuarios.find(u => u.email.toLowerCase() === email.toLowerCase());
+    const exists = usuarios.find(
+      (u) => u.email.toLowerCase() === email.toLowerCase()
+    );
     if (exists) throw new Error("Ya existe un usuario con ese correo");
 
-    const nuevoUsuario = { nombre, apellido, email, password, role: "user", activo: true };
+    const nuevoUsuario = {
+      nombre,
+      apellido,
+      email,
+      password,
+      role: "user",
+      activo: true,
+    };
 
     const res = await fetch(`${API_URL}/usuarios`, {
       method: "POST",
@@ -71,7 +89,7 @@ export function UsuariosProvider({ children }) {
     }
 
     const creado = await res.json();
-    setUsuarios(prev => [...prev, creado]);
+    setUsuarios((prev) => [...prev, creado]);
 
     const publicUser = {
       id: creado.id,
@@ -82,7 +100,7 @@ export function UsuariosProvider({ children }) {
     };
 
     setUsuarioLogueado(publicUser);
-    localStorage.setItem('usuarioLogueado', JSON.stringify(publicUser));
+    localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
     return publicUser;
   };
 
@@ -103,13 +121,15 @@ export function UsuariosProvider({ children }) {
 
     const publicUser = await res.json();
     setUsuarioLogueado(publicUser);
-    localStorage.setItem('usuarioLogueado', JSON.stringify(publicUser));
+    localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
+
     return publicUser;
   };
 
   const logout = () => {
     setUsuarioLogueado(null);
-    localStorage.removeItem('usuarioLogueado');
+    localStorage.removeItem("usuarioLogueado");
+    setOrdenes([]); // limpiar órdenes al cerrar sesión
   };
 
   // ==========================
@@ -135,22 +155,55 @@ export function UsuariosProvider({ children }) {
       (u) => u.email.toLowerCase() === (email || "").toLowerCase()
     );
 
-  const addOrder = (order) => {
-    const newOrder = {
+  // ==========================
+  // CREAR ORDEN (POST REAL)
+  // ==========================
+  const addOrder = async (order) => {
+    if (!usuarioLogueado) throw new Error("No has iniciado sesión");
+
+    const orderData = {
       ...order,
-      id: Date.now(),
-      fecha: new Date().toISOString(),
-      estado: "Pendiente",
+      usuarioId: usuarioLogueado.id,
     };
-    setOrdenes((prev) => [newOrder, ...prev]);
-    return newOrder;
+
+    const res = await fetch(`${API_URL}/ordenes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orderData),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Error al crear la orden");
+    }
+
+    const creada = await res.json();
+    setOrdenes((prev) => [creada, ...prev]);
+    return creada;
   };
 
-  const cancelOrder = (id) =>
-    setOrdenes((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, estado: "Cancelado" } : o))
-    );
+  // ==========================
+  // CANCELAR ORDEN
+  // ==========================
+  const cancelOrder = async (id) => {
+    const res = await fetch(`${API_URL}/ordenes/${id}/cancelar`, {
+      method: "PUT",
+    });
 
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Error al cancelar orden");
+    }
+
+    const actualizada = await res.json();
+    setOrdenes((prev) =>
+      prev.map((o) => (o.id === id ? actualizada : o))
+    );
+  };
+
+  // ==========================
+  // ACTIVAR/DESACTIVAR USUARIO (ADMIN)
+  // ==========================
   const adminToggleUser = (id) =>
     setUsuarios((prev) =>
       prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
@@ -160,7 +213,7 @@ export function UsuariosProvider({ children }) {
   // ACTUALIZAR USUARIO
   // ==========================
   const updateUsuario = async (id, datos) => {
-    const usuario = usuarios.find(u => u.id === id);
+    const usuario = usuarios.find((u) => u.id === id);
     if (!usuario) return;
 
     const res = await fetch(`${API_URL}/usuarios/${id}`, {
@@ -175,7 +228,10 @@ export function UsuariosProvider({ children }) {
     }
 
     const actualizado = await res.json();
-    setUsuarios(prev => prev.map(u => (u.id === actualizado.id ? actualizado : u)));
+
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === actualizado.id ? actualizado : u))
+    );
 
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
@@ -185,7 +241,7 @@ export function UsuariosProvider({ children }) {
         email: actualizado.email,
       };
       setUsuarioLogueado(updatedLogueado);
-      localStorage.setItem('usuarioLogueado', JSON.stringify(updatedLogueado));
+      localStorage.setItem("usuarioLogueado", JSON.stringify(updatedLogueado));
     }
   };
 
