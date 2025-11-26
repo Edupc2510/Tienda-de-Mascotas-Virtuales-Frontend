@@ -8,7 +8,7 @@ export const useProductos = () => {
   return ctx;
 };
 
-const API_URL = 'http://localhost:5000';
+const API_URL = 'https://kozzyserverapi.azurewebsites.net';
 
 export function ProductosProvider({ children }) {
   const [productos, setProductos] = useState([]);

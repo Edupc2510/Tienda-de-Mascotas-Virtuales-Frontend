@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useUsuarios } from "../context/UsuariosContext";
 import "./OrderDetail.css";
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://kozzyserverapi.azurewebsites.net";
 
 export default function OrderDetail() {
   const { id } = useParams();

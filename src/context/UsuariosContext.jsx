@@ -9,7 +9,7 @@ export const useUsuarios = () => {
   return ctx;
 };
 
-const API_URL = "http://localhost:5000";
+const API_URL = "https://kozzyserverapi.azurewebsites.net";
 
 export function UsuariosProvider({ children }) {
   const [usuarios, setUsuarios] = useState([]);
@@ -130,6 +130,32 @@ export function UsuariosProvider({ children }) {
     return await res.json();
   };
 
+  const forgotPassword = (email) =>
+    usuarios.some(
+      (u) => u.email.toLowerCase() === (email || "").toLowerCase()
+    );
+
+  const addOrder = (order) => {
+    const newOrder = {
+      ...order,
+      id: Date.now(),
+      fecha: new Date().toISOString(),
+      estado: "Pendiente",
+    };
+    setOrdenes((prev) => [newOrder, ...prev]);
+    return newOrder;
+  };
+
+  const cancelOrder = (id) =>
+    setOrdenes((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, estado: "Cancelado" } : o))
+    );
+
+  const adminToggleUser = (id) =>
+    setUsuarios((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
+    );
+
   // ==========================
   // ACTUALIZAR USUARIO
   // ==========================
@@ -175,6 +201,10 @@ export function UsuariosProvider({ children }) {
         login,
         logout,
         cambiarPassword,
+        forgotPassword,
+        addOrder,
+        cancelOrder,
+        adminToggleUser,
         updateUsuario,
       }}
     >
