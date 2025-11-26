@@ -116,16 +116,15 @@ export default function Pomodoro() {
     const map = new Map(); // id -> producto
 
     for (const o of pendientes) {
-      // 1) Preferir detalle (trae producto completo)
+      // 1) Preferir detalle (trae producto completo si el backend lo incluye)
       if (Array.isArray(o.detalle) && o.detalle.length > 0) {
         for (const d of o.detalle) {
           const p = d?.producto;
           if (!p) continue;
 
-          // si tu modelo Producto tiene "activo", filtramos; si no existe, lo dejamos pasar
+          // Si existe "activo", filtramos; si no existe, lo dejamos pasar
           const activoOk =
             p.activo === undefined || p.activo === null ? true : !!p.activo;
-
           if (!activoOk) continue;
 
           const id = p.id;
@@ -136,10 +135,10 @@ export default function Pomodoro() {
         continue;
       }
 
-      // 2) Fallback a items (ahora pueden venir como { productoId, nombre, imagenUrl, ... })
+      // 2) Fallback a items (si por alguna razón detalle no viene)
       if (Array.isArray(o.items) && o.items.length > 0) {
         for (const it of o.items) {
-          const id = it?.id ?? it?.productoId; // 👈 clave
+          const id = it?.id ?? it?.productoId;
           if (!id) continue;
 
           const productoLike = {
@@ -148,11 +147,12 @@ export default function Pomodoro() {
             imagenUrl: it?.imagenUrl ?? it?.imagen ?? it?.image ?? null,
             imagenUrlCartoon: it?.imagenUrlCartoon ?? null,
             activo:
-              it?.activo === undefined || it?.activo === null ? true : !!it.activo,
+              it?.activo === undefined || it?.activo === null
+                ? true
+                : !!it.activo,
           };
 
           if (!productoLike.activo) continue;
-
           if (!map.has(id)) map.set(id, productoLike);
         }
       }
@@ -170,7 +170,6 @@ export default function Pomodoro() {
       mascotasActivas.length > 0 &&
       !mascotasActivas.some((m) => m.id === mascotaSeleccionada.id)
     ) {
-      // si la seleccionada ya no está disponible (p.ej. se canceló), elegir la primera
       setMascotaSeleccionada(mascotasActivas[0]);
     } else if (mascotasActivas.length === 0) {
       setMascotaSeleccionada(null);
@@ -220,8 +219,6 @@ export default function Pomodoro() {
     );
   }
 
-  // Si no hay mascotas pendientes, avisa (opcional)
-  // (puedes quitar esto si prefieres que igual salga el pomodoro sin selector)
   const sinMascotas = mascotasActivas.length === 0;
 
   return (

@@ -1,272 +1,107 @@
-// src/context/UsuariosContext.jsx
-import { createContext, useContext, useEffect, useState } from "react";
+// src/context/ProductosContext.jsx
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-const UsuariosContext = createContext();
+const ProductosContext = createContext(null);
 
-export const useUsuarios = () => {
-  const ctx = useContext(UsuariosContext);
-  if (!ctx) throw new Error("useUsuarios debe usarse dentro de UsuariosProvider");
+export const useProductos = () => {
+  const ctx = useContext(ProductosContext);
+  if (!ctx) throw new Error("useProductos debe usarse dentro de ProductosProvider");
   return ctx;
 };
 
 const API_URL = "https://kozzyserverapi.azurewebsites.net";
 
-export function UsuariosProvider({ children }) {
-  const [usuarios, setUsuarios] = useState([]);
-  const [usuarioLogueado, setUsuarioLogueado] = useState(() => {
-    const stored = localStorage.getItem("usuarioLogueado");
-    return stored ? JSON.parse(stored) : null;
+export function ProductosProvider({ children }) {
+  const [productos, setProductos] = useState([]);
+  const [cargandoProductos, setCargandoProductos] = useState(false);
+  const [errorProductos, setErrorProductos] = useState(null);
+
+  const [carrito, setCarrito] = useState(() => {
+    const stored = localStorage.getItem("carrito");
+    return stored ? JSON.parse(stored) : [];
   });
 
-  const [ordenes, setOrdenes] = useState([]);
-  const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState(null);
-
-  // ==========================
-  // CARGAR USUARIOS Y ÓRDENES
-  // ==========================
+  // Persistir carrito
   useEffect(() => {
-    const fetchInicial = async () => {
+    localStorage.setItem("carrito", JSON.stringify(carrito));
+  }, [carrito]);
+
+  // Cargar productos
+  useEffect(() => {
+    const fetchProductos = async () => {
       try {
-        setCargando(true);
-        setError(null);
+        setCargandoProductos(true);
+        setErrorProductos(null);
 
-        // Usuarios
-        const resU = await fetch(`${API_URL}/usuarios`);
-        if (!resU.ok) throw new Error("Error al cargar usuarios");
-        const dataU = await resU.json();
-        setUsuarios(dataU || []);
-
-        // Órdenes (solo si hay usuario logueado)
-        if (usuarioLogueado) {
-          const resO = await fetch(
-            `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`
-          );
-          if (!resO.ok) throw new Error("Error al cargar órdenes");
-          const dataO = await resO.json();
-          setOrdenes(dataO || []);
-        }
+        const res = await fetch(`${API_URL}/productos`);
+        if (!res.ok) throw new Error("Error al cargar productos");
+        const data = await res.json();
+        setProductos(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error(err);
-        setError(err.message);
+        setErrorProductos(err.message);
       } finally {
-        setCargando(false);
+        setCargandoProductos(false);
       }
     };
 
-    fetchInicial();
-  }, [usuarioLogueado]);
+    fetchProductos();
+  }, []);
 
-  // ==========================
-  // REGISTRO
-  // ==========================
-  const register = async ({ nombre = "", apellido = "", email, password }) => {
-    if (!email || !password) throw new Error("Faltan datos");
-
-    const exists = usuarios.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase()
-    );
-    if (exists) throw new Error("Ya existe un usuario con ese correo");
-
-    const nuevoUsuario = {
-      nombre,
-      apellido,
-      email,
-      password,
-      role: "user",
-      activo: true,
-    };
-
-    const res = await fetch(`${API_URL}/usuarios`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(nuevoUsuario),
+  const categorias = useMemo(() => {
+    const set = new Set();
+    productos.forEach((p) => {
+      if (p?.categoria) set.add(p.categoria);
     });
+    return Array.from(set);
+  }, [productos]);
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al registrar usuario");
-    }
+  const addToCarrito = (producto, cantidad = 1) => {
+    if (!producto?.id) return;
+    const qty = Number(cantidad || 1);
 
-    const creado = await res.json();
-    setUsuarios((prev) => [...prev, creado]);
-
-    const publicUser = {
-      id: creado.id,
-      nombre: creado.nombre,
-      apellido: creado.apellido,
-      email: creado.email,
-      role: creado.role,
-    };
-
-    setUsuarioLogueado(publicUser);
-    localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
-    return publicUser;
+    setCarrito((prev) => {
+      const idx = prev.findIndex((x) => x.id === producto.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], cantidad: (copy[idx].cantidad || 1) + qty };
+        return copy;
+      }
+      return [...prev, { ...producto, cantidad: qty }];
+    });
   };
 
-  // ==========================
-  // LOGIN
-  // ==========================
-  const login = async ({ email, password }) => {
-    const res = await fetch(`${API_URL}/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al iniciar sesión");
-    }
-
-    const publicUser = await res.json();
-    setUsuarioLogueado(publicUser);
-    localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
-
-    return publicUser;
+  const quitarDelCarrito = (id) => {
+    setCarrito((prev) => prev.filter((x) => x.id !== id));
   };
 
-  const logout = () => {
-    setUsuarioLogueado(null);
-    localStorage.removeItem("usuarioLogueado");
-    setOrdenes([]); // limpiar órdenes al cerrar sesión
-  };
-
-  // ==========================
-  // CAMBIAR CONTRASEÑA
-  // ==========================
-  const cambiarPassword = async (id, actual, nueva) => {
-    const res = await fetch(`${API_URL}/usuarios/${id}/password`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actual, nueva }),
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al cambiar la contraseña");
-    }
-
-    return await res.json();
-  };
-
-  const forgotPassword = (email) =>
-    usuarios.some(
-      (u) => u.email.toLowerCase() === (email || "").toLowerCase()
-    );
-
-  // ==========================
-  // CREAR ORDEN (ENVÍA ITEMS)
-  // ==========================
-  const addOrder = async (order) => {
-    if (!usuarioLogueado) throw new Error("No has iniciado sesión");
-
-    const orderData = {
-      usuarioId: usuarioLogueado.id,
-      total: order.total,
-      items: order.items, // <--- IMPORTANTÍSIMO
-    };
-
-    const res = await fetch(`${API_URL}/ordenes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(orderData),
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al crear la orden");
-    }
-
-    const creada = await res.json();
-    setOrdenes((prev) => [creada, ...prev]);
-
-    return creada;
-  };
-
-  // ==========================
-  // CANCELAR ORDEN
-  // ==========================
-  const cancelOrder = async (id) => {
-    const res = await fetch(`${API_URL}/ordenes/${id}/cancelar`, {
-      method: "PUT",
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al cancelar orden");
-    }
-
-    const actualizada = await res.json();
-    setOrdenes((prev) =>
-      prev.map((o) => (o.id === id ? actualizada : o))
+  const cambiarCantidad = (id, cantidad) => {
+    const qty = Math.max(1, Number(cantidad || 1));
+    setCarrito((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, cantidad: qty } : x))
     );
   };
 
-  // ==========================
-  // ACTIVAR/DESACTIVAR USUARIO (ADMIN)
-  // ==========================
-  const adminToggleUser = (id) =>
-    setUsuarios((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
-    );
-
-  // ==========================
-  // ACTUALIZAR USUARIO
-  // ==========================
-  const updateUsuario = async (id, datos) => {
-    const usuario = usuarios.find((u) => u.id === id);
-    if (!usuario) return;
-
-    const res = await fetch(`${API_URL}/usuarios/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...usuario, ...datos }),
-    });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || "Error al actualizar usuario");
-    }
-
-    const actualizado = await res.json();
-
-    setUsuarios((prev) =>
-      prev.map((u) => (u.id === actualizado.id ? actualizado : u))
-    );
-
-    if (usuarioLogueado?.id === id) {
-      const updatedLogueado = {
-        ...usuarioLogueado,
-        nombre: actualizado.nombre,
-        apellido: actualizado.apellido,
-        email: actualizado.email,
-      };
-      setUsuarioLogueado(updatedLogueado);
-      localStorage.setItem("usuarioLogueado", JSON.stringify(updatedLogueado));
-    }
-  };
+  const vaciarCarrito = () => setCarrito([]);
 
   return (
-    <UsuariosContext.Provider
+    <ProductosContext.Provider
       value={{
-        usuarios,
-        usuarioLogueado,
-        ordenes,
-        cargando,
-        error,
-        register,
-        login,
-        logout,
-        cambiarPassword,
-        forgotPassword,
-        addOrder,
-        cancelOrder,
-        adminToggleUser,
-        updateUsuario,
+        productos,
+        setProductos,
+        cargandoProductos,
+        errorProductos,
+
+        carrito,
+        addToCarrito,
+        quitarDelCarrito,
+        cambiarCantidad,
+        vaciarCarrito,
+
+        categorias,
       }}
     >
       {children}
-    </UsuariosContext.Provider>
+    </ProductosContext.Provider>
   );
 }
