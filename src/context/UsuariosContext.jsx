@@ -14,93 +14,99 @@ const API_URL = "https://kozzyserverapi.azurewebsites.net";
 export function UsuariosProvider({ children }) {
   const [usuarios, setUsuarios] = useState([]);
   const [usuarioLogueado, setUsuarioLogueado] = useState(() => {
-    const stored = localStorage.getItem("usuarioLogueado");
-    return stored ? JSON.parse(stored) : null;
+    try {
+      const stored = localStorage.getItem("usuarioLogueado");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
   });
 
-  // guardamos TODAS las órdenes tal cual vienen de la BD
-  const [ordenesAll, setOrdenesAll] = useState([]);
-
+  const [ordenes, setOrdenes] = useState([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
-  const esAdmin = (u) => String(u?.role || "").toLowerCase() === "admin";
+  const esAdmin = useMemo(
+    () => String(usuarioLogueado?.role || "").toLowerCase() === "admin",
+    [usuarioLogueado?.role]
+  );
 
   // ========================================================
-  // CARGA INICIAL: trae usuarios + todas las órdenes
-  // (igual que AdminUsuarios: el componente solo consume arrays del context)
+  // CARGAR USUARIOS Y ÓRDENES
+  // - siempre carga usuarios
+  // - si hay usuario logueado:
+  //    - sincroniza su role desde BD (por si localStorage está viejo)
+  //    - si es admin => trae TODAS las órdenes
+  //    - si no => trae solo sus órdenes
   // ========================================================
-  const refrescarDatos = async () => {
-    try {
-      setCargando(true);
-      setError(null);
+  useEffect(() => {
+    const fetchInicial = async () => {
+      try {
+        setCargando(true);
+        setError(null);
 
-      const [resU, resO] = await Promise.all([
-        fetch(`${API_URL}/usuarios`),
-        fetch(`${API_URL}/ordenes`),
-      ]);
+        // 1) Usuarios
+        const resU = await fetch(`${API_URL}/usuarios`);
+        if (!resU.ok) throw new Error("Error al cargar usuarios");
+        const dataU = await resU.json();
+        const listaUsuarios = Array.isArray(dataU) ? dataU : [];
+        setUsuarios(listaUsuarios);
 
-      if (!resU.ok) throw new Error("Error al cargar usuarios");
-      if (!resO.ok) throw new Error("Error al cargar órdenes");
+        // 2) Órdenes
+        if (!usuarioLogueado?.id) {
+          setOrdenes([]);
+          return;
+        }
 
-      const dataU = await resU.json();
-      const dataO = await resO.json();
-
-      const listaUsuarios = Array.isArray(dataU) ? dataU : [];
-      setUsuarios(listaUsuarios);
-
-      setOrdenesAll(Array.isArray(dataO) ? dataO : []);
-
-      // sincroniza role/nombre/etc del user logueado con lo que hay en la BD
-      if (usuarioLogueado?.id) {
-        const uDb = listaUsuarios.find((u) => String(u.id) === String(usuarioLogueado.id));
-        if (uDb) {
-          const synced = {
+        // Sincronizar usuarioLogueado con BD (role/activo/nombre/apellido/email)
+        const fromDb = listaUsuarios.find((u) => Number(u.id) === Number(usuarioLogueado.id));
+        if (fromDb) {
+          const merged = {
             ...usuarioLogueado,
-            nombre: uDb.nombre ?? usuarioLogueado.nombre,
-            apellido: uDb.apellido ?? usuarioLogueado.apellido,
-            email: uDb.email ?? usuarioLogueado.email,
-            role: uDb.role ?? usuarioLogueado.role,
+            nombre: fromDb.nombre ?? usuarioLogueado.nombre,
+            apellido: fromDb.apellido ?? usuarioLogueado.apellido,
+            email: fromDb.email ?? usuarioLogueado.email,
+            role: fromDb.role ?? usuarioLogueado.role,
           };
-          const changed = JSON.stringify(synced) !== JSON.stringify(usuarioLogueado);
+
+          // Si cambió algo importante (ej role), actualiza localStorage/state
+          const changed =
+            merged.nombre !== usuarioLogueado.nombre ||
+            merged.apellido !== usuarioLogueado.apellido ||
+            merged.email !== usuarioLogueado.email ||
+            merged.role !== usuarioLogueado.role;
+
           if (changed) {
-            setUsuarioLogueado(synced);
-            localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
+            setUsuarioLogueado(merged);
+            localStorage.setItem("usuarioLogueado", JSON.stringify(merged));
           }
         }
+
+        const roleFinal = String((fromDb?.role ?? usuarioLogueado.role) || "").toLowerCase();
+        const urlOrdenes =
+          roleFinal === "admin"
+            ? `${API_URL}/ordenes`
+            : `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`;
+
+        const resO = await fetch(urlOrdenes);
+        if (!resO.ok) throw new Error("Error al cargar órdenes");
+        const dataO = await resO.json();
+        setOrdenes(Array.isArray(dataO) ? dataO : []);
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "Error cargando datos");
+      } finally {
+        setCargando(false);
       }
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Error cargando datos");
-      setUsuarios([]);
-      setOrdenesAll([]);
-    } finally {
-      setCargando(false);
-    }
-  };
+    };
 
-  useEffect(() => {
-    refrescarDatos();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchInicial();
+    // OJO: depende del id/role guardado; role puede actualizarse adentro cuando sincroniza
+  }, [usuarioLogueado?.id, usuarioLogueado?.role]);
 
   // ========================================================
-  // ÓRDENES “VISIBLES” SEGÚN SESIÓN
-  // - admin: todas
-  // - user: solo las suyas
-  // - sin sesión: []
-  // ========================================================
-  const ordenes = useMemo(() => {
-    if (!usuarioLogueado?.id) return [];
-    if (esAdmin(usuarioLogueado)) return ordenesAll;
-
-    const uid = String(usuarioLogueado.id);
-    return (ordenesAll || []).filter((o) => String(o.usuarioId) === uid);
-  }, [ordenesAll, usuarioLogueado?.id, usuarioLogueado?.role]);
-
-  // ==========================
   // REGISTRO
-  // ==========================
+  // ========================================================
   const register = async ({ nombre = "", apellido = "", email, password }) => {
     if (!email || !password) throw new Error("Faltan datos");
 
@@ -142,16 +148,12 @@ export function UsuariosProvider({ children }) {
 
     setUsuarioLogueado(publicUser);
     localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
-
-    // opcional pero útil: refresca órdenes/usuarios
-    refrescarDatos();
-
     return publicUser;
   };
 
-  // ==========================
+  // ========================================================
   // LOGIN
-  // ==========================
+  // ========================================================
   const login = async ({ email, password }) => {
     const res = await fetch(`${API_URL}/login`, {
       method: "POST",
@@ -167,24 +169,18 @@ export function UsuariosProvider({ children }) {
     const publicUser = await res.json();
     setUsuarioLogueado(publicUser);
     localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
-
-    // IMPORTANTÍSIMO: al loguear, recarga data (así admin ve todo)
-    refrescarDatos();
-
     return publicUser;
   };
 
   const logout = () => {
     setUsuarioLogueado(null);
     localStorage.removeItem("usuarioLogueado");
-    // no borro ordenesAll; solo “ordenes visibles” quedarán [] por el memo,
-    // pero si prefieres, también puedes limpiar:
-    // setOrdenesAll([]);
+    setOrdenes([]);
   };
 
-  // ==========================
+  // ========================================================
   // CAMBIAR CONTRASEÑA
-  // ==========================
+  // ========================================================
   const cambiarPassword = async (id, actual, nueva) => {
     const res = await fetch(`${API_URL}/usuarios/${id}/password`, {
       method: "PUT",
@@ -205,16 +201,21 @@ export function UsuariosProvider({ children }) {
       (u) => String(u.email).toLowerCase() === String(email || "").toLowerCase()
     );
 
-  // ==========================
+  // ========================================================
   // CREAR ORDEN (POST)
-  // ==========================
+  // ========================================================
   const addOrder = async (order) => {
-    if (!usuarioLogueado?.id) throw new Error("No has iniciado sesión");
+    if (!usuarioLogueado) throw new Error("No has iniciado sesión");
+
+    const orderData = {
+      ...order,
+      usuarioId: usuarioLogueado.id,
+    };
 
     const res = await fetch(`${API_URL}/ordenes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...order, usuarioId: usuarioLogueado.id }),
+      body: JSON.stringify(orderData),
     });
 
     if (!res.ok) {
@@ -223,16 +224,13 @@ export function UsuariosProvider({ children }) {
     }
 
     const creada = await res.json();
-
-    // la insertamos en ordenesAll para que admin y user la vean al toque
-    setOrdenesAll((prev) => [creada, ...(prev || [])]);
-
+    setOrdenes((prev) => [creada, ...prev]);
     return creada;
   };
 
-  // ==========================
-  // CANCELAR ORDEN (DELETE /ordenes/:id) => backend setea estado=Cancelado
-  // ==========================
+  // ========================================================
+  // CANCELAR ORDEN (DELETE /ordenes/:id) => estado = "Cancelado"
+  // ========================================================
   const cancelOrder = async (id) => {
     const res = await fetch(`${API_URL}/ordenes/${id}`, { method: "DELETE" });
 
@@ -241,10 +239,10 @@ export function UsuariosProvider({ children }) {
       throw new Error(errData.error || "Error al cancelar orden");
     }
 
-    const ordenActualizada = await res.json().catch(() => ({}));
+    const ordenActualizada = await res.json().catch(() => null);
 
-    setOrdenesAll((prev) =>
-      (prev || []).map((o) =>
+    setOrdenes((prev) =>
+      prev.map((o) =>
         o.id === id
           ? (ordenActualizada?.id ? ordenActualizada : { ...o, estado: "Cancelado" })
           : o
@@ -254,20 +252,20 @@ export function UsuariosProvider({ children }) {
     return ordenActualizada;
   };
 
-  // ==========================
-  // ACTIVAR/DESACTIVAR USUARIO (solo front)
-  // ==========================
+  // ========================================================
+  // ACTIVAR/DESACTIVAR USUARIO (ADMIN) (solo UI local)
+  // ========================================================
   const adminToggleUser = (id) =>
     setUsuarios((prev) =>
-      (prev || []).map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
+      prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
     );
 
-  // ==========================
+  // ========================================================
   // ACTUALIZAR USUARIO
-  // ==========================
+  // ========================================================
   const updateUsuario = async (id, datos) => {
     const usuario = usuarios.find((u) => u.id === id);
-    if (!usuario) return;
+    if (!usuario) return null;
 
     const res = await fetch(`${API_URL}/usuarios/${id}`, {
       method: "PUT",
@@ -283,9 +281,10 @@ export function UsuariosProvider({ children }) {
     const actualizado = await res.json();
 
     setUsuarios((prev) =>
-      (prev || []).map((u) => (u.id === actualizado.id ? actualizado : u))
+      prev.map((u) => (u.id === actualizado.id ? actualizado : u))
     );
 
+    // si actualizaste al usuario logueado (incluye role), refresca localStorage
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
         ...usuarioLogueado,
@@ -306,9 +305,11 @@ export function UsuariosProvider({ children }) {
       value={{
         usuarios,
         usuarioLogueado,
-        ordenes,       // 👈 lo que consumen AdminDashboard/AdminOrdenes
+        ordenes,
         cargando,
         error,
+        esAdmin,
+
         register,
         login,
         logout,
@@ -318,7 +319,6 @@ export function UsuariosProvider({ children }) {
         cancelOrder,
         adminToggleUser,
         updateUsuario,
-        refrescarDatos, // por si quieres forzar recarga manual
       }}
     >
       {children}
