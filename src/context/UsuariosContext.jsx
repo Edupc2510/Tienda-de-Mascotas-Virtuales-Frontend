@@ -1,5 +1,5 @@
 // src/context/UsuariosContext.jsx
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const UsuariosContext = createContext(null);
 
@@ -18,85 +18,85 @@ export function UsuariosProvider({ children }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const [ordenes, setOrdenes] = useState([]);
+  // guardamos TODAS las órdenes tal cual vienen de la BD
+  const [ordenesAll, setOrdenesAll] = useState([]);
+
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
   const esAdmin = (u) => String(u?.role || "").toLowerCase() === "admin";
 
-  // ==========================
-  // CARGAR USUARIOS + SINCRONIZAR usuarioLogueado Y CARGAR ÓRDENES
-  // - Admin: /ordenes (todas)
-  // - User : /ordenes?usuarioId=...
-  // ==========================
-  useEffect(() => {
-    const fetchInicial = async () => {
-      try {
-        setCargando(true);
-        setError(null);
+  // ========================================================
+  // CARGA INICIAL: trae usuarios + todas las órdenes
+  // (igual que AdminUsuarios: el componente solo consume arrays del context)
+  // ========================================================
+  const refrescarDatos = async () => {
+    try {
+      setCargando(true);
+      setError(null);
 
-        // 1) Usuarios
-        const resU = await fetch(`${API_URL}/usuarios`);
-        if (!resU.ok) throw new Error("Error al cargar usuarios");
-        const dataU = await resU.json();
-        const listaUsuarios = Array.isArray(dataU) ? dataU : [];
-        setUsuarios(listaUsuarios);
+      const [resU, resO] = await Promise.all([
+        fetch(`${API_URL}/usuarios`),
+        fetch(`${API_URL}/ordenes`),
+      ]);
 
-        // 2) Si hay sesión, sincroniza datos (incluye role desde BD)
-        let current = usuarioLogueado;
+      if (!resU.ok) throw new Error("Error al cargar usuarios");
+      if (!resO.ok) throw new Error("Error al cargar órdenes");
 
-        if (usuarioLogueado?.id) {
-          const uDb = listaUsuarios.find((u) => String(u.id) === String(usuarioLogueado.id));
-          if (uDb) {
-            const synced = {
-              ...usuarioLogueado,
-              nombre: uDb.nombre ?? usuarioLogueado.nombre,
-              apellido: uDb.apellido ?? usuarioLogueado.apellido,
-              email: uDb.email ?? usuarioLogueado.email,
-              role: uDb.role ?? usuarioLogueado.role,
-            };
+      const dataU = await resU.json();
+      const dataO = await resO.json();
 
-            // actualiza localStorage solo si cambió algo relevante
-            const changed =
-              synced.nombre !== usuarioLogueado.nombre ||
-              synced.apellido !== usuarioLogueado.apellido ||
-              synced.email !== usuarioLogueado.email ||
-              synced.role !== usuarioLogueado.role;
+      const listaUsuarios = Array.isArray(dataU) ? dataU : [];
+      setUsuarios(listaUsuarios);
 
-            if (changed) {
-              setUsuarioLogueado(synced);
-              localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
-            }
+      setOrdenesAll(Array.isArray(dataO) ? dataO : []);
 
-            current = synced;
+      // sincroniza role/nombre/etc del user logueado con lo que hay en la BD
+      if (usuarioLogueado?.id) {
+        const uDb = listaUsuarios.find((u) => String(u.id) === String(usuarioLogueado.id));
+        if (uDb) {
+          const synced = {
+            ...usuarioLogueado,
+            nombre: uDb.nombre ?? usuarioLogueado.nombre,
+            apellido: uDb.apellido ?? usuarioLogueado.apellido,
+            email: uDb.email ?? usuarioLogueado.email,
+            role: uDb.role ?? usuarioLogueado.role,
+          };
+          const changed = JSON.stringify(synced) !== JSON.stringify(usuarioLogueado);
+          if (changed) {
+            setUsuarioLogueado(synced);
+            localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
           }
         }
-
-        // 3) Órdenes
-        if (current?.id) {
-          const url = esAdmin(current)
-            ? `${API_URL}/ordenes`
-            : `${API_URL}/ordenes?usuarioId=${encodeURIComponent(current.id)}`;
-
-          const resO = await fetch(url);
-          if (!resO.ok) throw new Error("Error al cargar órdenes");
-          const dataO = await resO.json();
-          setOrdenes(Array.isArray(dataO) ? dataO : []);
-        } else {
-          setOrdenes([]);
-        }
-      } catch (err) {
-        console.error(err);
-        setError(err.message || "Error cargando datos");
-        setOrdenes([]);
-      } finally {
-        setCargando(false);
       }
-    };
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "Error cargando datos");
+      setUsuarios([]);
+      setOrdenesAll([]);
+    } finally {
+      setCargando(false);
+    }
+  };
 
-    fetchInicial();
+  useEffect(() => {
+    refrescarDatos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuarioLogueado?.id]);
+  }, []);
+
+  // ========================================================
+  // ÓRDENES “VISIBLES” SEGÚN SESIÓN
+  // - admin: todas
+  // - user: solo las suyas
+  // - sin sesión: []
+  // ========================================================
+  const ordenes = useMemo(() => {
+    if (!usuarioLogueado?.id) return [];
+    if (esAdmin(usuarioLogueado)) return ordenesAll;
+
+    const uid = String(usuarioLogueado.id);
+    return (ordenesAll || []).filter((o) => String(o.usuarioId) === uid);
+  }, [ordenesAll, usuarioLogueado?.id, usuarioLogueado?.role]);
 
   // ==========================
   // REGISTRO
@@ -142,6 +142,10 @@ export function UsuariosProvider({ children }) {
 
     setUsuarioLogueado(publicUser);
     localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
+
+    // opcional pero útil: refresca órdenes/usuarios
+    refrescarDatos();
+
     return publicUser;
   };
 
@@ -163,13 +167,19 @@ export function UsuariosProvider({ children }) {
     const publicUser = await res.json();
     setUsuarioLogueado(publicUser);
     localStorage.setItem("usuarioLogueado", JSON.stringify(publicUser));
+
+    // IMPORTANTÍSIMO: al loguear, recarga data (así admin ve todo)
+    refrescarDatos();
+
     return publicUser;
   };
 
   const logout = () => {
     setUsuarioLogueado(null);
     localStorage.removeItem("usuarioLogueado");
-    setOrdenes([]);
+    // no borro ordenesAll; solo “ordenes visibles” quedarán [] por el memo,
+    // pero si prefieres, también puedes limpiar:
+    // setOrdenesAll([]);
   };
 
   // ==========================
@@ -199,17 +209,12 @@ export function UsuariosProvider({ children }) {
   // CREAR ORDEN (POST)
   // ==========================
   const addOrder = async (order) => {
-    if (!usuarioLogueado) throw new Error("No has iniciado sesión");
-
-    const orderData = {
-      ...order,
-      usuarioId: usuarioLogueado.id,
-    };
+    if (!usuarioLogueado?.id) throw new Error("No has iniciado sesión");
 
     const res = await fetch(`${API_URL}/ordenes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(orderData),
+      body: JSON.stringify({ ...order, usuarioId: usuarioLogueado.id }),
     });
 
     if (!res.ok) {
@@ -218,12 +223,15 @@ export function UsuariosProvider({ children }) {
     }
 
     const creada = await res.json();
-    setOrdenes((prev) => [creada, ...prev]);
+
+    // la insertamos en ordenesAll para que admin y user la vean al toque
+    setOrdenesAll((prev) => [creada, ...(prev || [])]);
+
     return creada;
   };
 
   // ==========================
-  // CANCELAR ORDEN (DELETE /ordenes/:id) => backend cambia estado a "Cancelado"
+  // CANCELAR ORDEN (DELETE /ordenes/:id) => backend setea estado=Cancelado
   // ==========================
   const cancelOrder = async (id) => {
     const res = await fetch(`${API_URL}/ordenes/${id}`, { method: "DELETE" });
@@ -235,19 +243,23 @@ export function UsuariosProvider({ children }) {
 
     const ordenActualizada = await res.json().catch(() => ({}));
 
-    setOrdenes((prev) =>
-      prev.map((o) => (o.id === id ? (ordenActualizada?.id ? ordenActualizada : { ...o, estado: "Cancelado" }) : o))
+    setOrdenesAll((prev) =>
+      (prev || []).map((o) =>
+        o.id === id
+          ? (ordenActualizada?.id ? ordenActualizada : { ...o, estado: "Cancelado" })
+          : o
+      )
     );
 
     return ordenActualizada;
   };
 
   // ==========================
-  // ADMIN TOGGLE (solo front: si quieres real, haz endpoint)
+  // ACTIVAR/DESACTIVAR USUARIO (solo front)
   // ==========================
   const adminToggleUser = (id) =>
     setUsuarios((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
+      (prev || []).map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
     );
 
   // ==========================
@@ -271,10 +283,9 @@ export function UsuariosProvider({ children }) {
     const actualizado = await res.json();
 
     setUsuarios((prev) =>
-      prev.map((u) => (u.id === actualizado.id ? actualizado : u))
+      (prev || []).map((u) => (u.id === actualizado.id ? actualizado : u))
     );
 
-    // si editaste al mismo usuario logueado, sincroniza localStorage (incluye role)
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
         ...usuarioLogueado,
@@ -295,7 +306,7 @@ export function UsuariosProvider({ children }) {
       value={{
         usuarios,
         usuarioLogueado,
-        ordenes,
+        ordenes,       // 👈 lo que consumen AdminDashboard/AdminOrdenes
         cargando,
         error,
         register,
@@ -307,6 +318,7 @@ export function UsuariosProvider({ children }) {
         cancelOrder,
         adminToggleUser,
         updateUsuario,
+        refrescarDatos, // por si quieres forzar recarga manual
       }}
     >
       {children}
