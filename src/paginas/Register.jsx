@@ -30,6 +30,11 @@ export default function Register() {
       return;
     }
 
+    if (String(form.password).length < 8) {
+      alert("La contraseña debe tener mínimo 8 caracteres.");
+      return;
+    }
+
     try {
       await register({
         nombre: form.nombre.trim(),

@@ -1,7 +1,7 @@
 // src/context/UsuariosContext.jsx
 import { createContext, useContext, useEffect, useState } from "react";
 
-const UsuariosContext = createContext();
+const UsuariosContext = createContext(null);
 
 export const useUsuarios = () => {
   const ctx = useContext(UsuariosContext);
@@ -22,8 +22,12 @@ export function UsuariosProvider({ children }) {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
+  const esAdmin = (u) => String(u?.role || "").toLowerCase() === "admin";
+
   // ==========================
   // CARGAR USUARIOS Y ÓRDENES
+  // - si es admin: trae TODAS las órdenes
+  // - si no: solo las del usuario logueado
   // ==========================
   useEffect(() => {
     const fetchInicial = async () => {
@@ -37,9 +41,13 @@ export function UsuariosProvider({ children }) {
         const dataU = await resU.json();
         setUsuarios(dataU || []);
 
-        // Órdenes (solo si hay usuario logueado)
+        // Órdenes
         if (usuarioLogueado?.id) {
-          const resO = await fetch(`${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`);
+          const url = esAdmin(usuarioLogueado)
+            ? `${API_URL}/ordenes`
+            : `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`;
+
+          const resO = await fetch(url);
           if (!resO.ok) throw new Error("Error al cargar órdenes");
           const dataO = await resO.json();
           setOrdenes(dataO || []);
@@ -48,14 +56,14 @@ export function UsuariosProvider({ children }) {
         }
       } catch (err) {
         console.error(err);
-        setError(err.message);
+        setError(err.message || "Error cargando datos");
       } finally {
         setCargando(false);
       }
     };
 
     fetchInicial();
-  }, [usuarioLogueado?.id]);
+  }, [usuarioLogueado?.id, usuarioLogueado?.role]);
 
   // ==========================
   // REGISTRO
@@ -64,7 +72,7 @@ export function UsuariosProvider({ children }) {
     if (!email || !password) throw new Error("Faltan datos");
 
     const exists = usuarios.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase()
+      (u) => String(u.email).toLowerCase() === String(email).toLowerCase()
     );
     if (exists) throw new Error("Ya existe un usuario con ese correo");
 
@@ -151,7 +159,7 @@ export function UsuariosProvider({ children }) {
 
   const forgotPassword = (email) =>
     usuarios.some(
-      (u) => u.email.toLowerCase() === (email || "").toLowerCase()
+      (u) => String(u.email).toLowerCase() === String(email || "").toLowerCase()
     );
 
   // ==========================
@@ -182,28 +190,26 @@ export function UsuariosProvider({ children }) {
   };
 
   // ==========================
-  // CANCELAR ORDEN (usa DELETE /ordenes/:id)
-  // Asumimos que tu backend NO borra físico, sino que setea estado=Cancelado
+  // CANCELAR ORDEN (DELETE /ordenes/:id)
+  // Backend: NO borra físico, solo cambia estado a "Cancelado"
   // ==========================
   const cancelOrder = async (id) => {
-    const res = await fetch(`${API_URL}/ordenes/${id}`, {
-      method: "DELETE",
-    });
+    const res = await fetch(`${API_URL}/ordenes/${id}`, { method: "DELETE" });
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || "Error al cancelar orden");
     }
 
-    // Tu backend puede devolver:
-    // A) { mensaje: "Orden eliminada" }  (tu delete actual)
-    // B) la orden actualizada
     const data = await res.json().catch(() => ({}));
 
+    // si el backend devuelve la orden actualizada, la usamos; si no, hacemos fallback
     setOrdenes((prev) =>
       prev.map((o) =>
         o.id === id
-          ? (typeof data === "object" && data?.id ? data : { ...o, estado: "Cancelado" })
+          ? data?.id
+            ? data
+            : { ...o, estado: "Cancelado" }
           : o
       )
     );
@@ -243,16 +249,20 @@ export function UsuariosProvider({ children }) {
       prev.map((u) => (u.id === actualizado.id ? actualizado : u))
     );
 
+    // si actualizaste al usuario logueado, refresca localStorage
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
         ...usuarioLogueado,
         nombre: actualizado.nombre,
         apellido: actualizado.apellido,
         email: actualizado.email,
+        role: actualizado.role ?? usuarioLogueado.role,
       };
       setUsuarioLogueado(updatedLogueado);
       localStorage.setItem("usuarioLogueado", JSON.stringify(updatedLogueado));
     }
+
+    return actualizado;
   };
 
   return (
