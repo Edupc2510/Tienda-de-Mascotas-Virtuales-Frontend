@@ -11,6 +11,7 @@ export const useProductos = () => {
 
 const API_URL = "https://kozzyserverapi.azurewebsites.net";
 const CART_KEY = "carrito";
+const SAVED_KEY = "guardados";
 
 export function ProductosProvider({ children }) {
   const [productos, setProductos] = useState([]);
@@ -27,6 +28,16 @@ export function ProductosProvider({ children }) {
     }
   });
 
+  const [guardados, setGuardados] = useState(() => {
+    try {
+      const stored = localStorage.getItem(SAVED_KEY);
+      const parsed = stored ? JSON.parse(stored) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
   // Persistir carrito
   useEffect(() => {
     try {
@@ -36,17 +47,37 @@ export function ProductosProvider({ children }) {
     }
   }, [carrito]);
 
-  // Sync entre tabs (opcional, pero evita “revivir” cosas raras)
+  // Persistir guardados
+  useEffect(() => {
+    try {
+      localStorage.setItem(SAVED_KEY, JSON.stringify(guardados));
+    } catch (e) {
+      console.error("No se pudo guardar guardados en localStorage:", e);
+    }
+  }, [guardados]);
+
+  // Sync entre tabs
   useEffect(() => {
     const onStorage = (e) => {
-      if (e.key !== CART_KEY) return;
-      try {
-        const next = e.newValue ? JSON.parse(e.newValue) : [];
-        setCarrito(Array.isArray(next) ? next : []);
-      } catch {
-        setCarrito([]);
+      if (e.key === CART_KEY) {
+        try {
+          const next = e.newValue ? JSON.parse(e.newValue) : [];
+          setCarrito(Array.isArray(next) ? next : []);
+        } catch {
+          setCarrito([]);
+        }
+      }
+
+      if (e.key === SAVED_KEY) {
+        try {
+          const next = e.newValue ? JSON.parse(e.newValue) : [];
+          setGuardados(Array.isArray(next) ? next : []);
+        } catch {
+          setGuardados([]);
+        }
       }
     };
+
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
@@ -81,18 +112,24 @@ export function ProductosProvider({ children }) {
     return Array.from(set);
   }, [productos]);
 
+  // helper: algunos items podrían venir con productoId (por si acaso)
+  const getId = (x) => x?.id ?? x?.productoId;
+
   const addToCarrito = (producto, cantidad = 1) => {
-    if (!producto?.id) return;
+    const id = getId(producto);
+    if (id === null || id === undefined) return;
+
     const qty = Math.max(1, Number(cantidad || 1));
 
     setCarrito((prev) => {
-      const idx = prev.findIndex((x) => x.id === producto.id);
+      const idx = prev.findIndex((x) => getId(x) === id);
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx] = { ...copy[idx], cantidad: (copy[idx].cantidad || 1) + qty };
         return copy;
       }
-      return [...prev, { ...producto, cantidad: qty }];
+      // aseguramos que SIEMPRE exista item.id para tu Carrito.jsx
+      return [...prev, { ...producto, id, cantidad: qty }];
     });
   };
 
@@ -100,13 +137,13 @@ export function ProductosProvider({ children }) {
   const agregarAlCarrito = addToCarrito;
 
   const quitarDelCarrito = (id) => {
-    setCarrito((prev) => prev.filter((x) => x.id !== id));
+    setCarrito((prev) => prev.filter((x) => getId(x) !== id));
   };
 
   const cambiarCantidad = (id, cantidad) => {
     const qty = Math.max(1, Number(cantidad || 1));
     setCarrito((prev) =>
-      prev.map((x) => (x.id === id ? { ...x, cantidad: qty } : x))
+      prev.map((x) => (getId(x) === id ? { ...x, cantidad: qty } : x))
     );
   };
 
@@ -115,15 +152,55 @@ export function ProductosProvider({ children }) {
     setCarrito([]);
     try {
       localStorage.removeItem(CART_KEY);
-      // por si acaso, dejarlo explícitamente vacío también:
       localStorage.setItem(CART_KEY, JSON.stringify([]));
     } catch (e) {
       console.error("No se pudo limpiar carrito en localStorage:", e);
     }
   };
 
-  // por si en otros lados lo llamas así
+  // alias
   const vaciarCarrito = limpiarCarrito;
+
+  // =========================
+  // Guardar para después (lo que tu /carrito espera)
+  // =========================
+  const guardarParaDespues = (id) => {
+    setCarrito((prevCarrito) => {
+      const item = prevCarrito.find((x) => getId(x) === id);
+      if (!item) return prevCarrito;
+
+      setGuardados((prevGuardados) => {
+        const idx = prevGuardados.findIndex((g) => getId(g) === id);
+        if (idx >= 0) {
+          const copy = [...prevGuardados];
+          copy[idx] = {
+            ...copy[idx],
+            cantidad: (copy[idx].cantidad || 1) + (item.cantidad || 1),
+          };
+          return copy;
+        }
+        return [...prevGuardados, item];
+      });
+
+      return prevCarrito.filter((x) => getId(x) !== id);
+    });
+  };
+
+  const regresarAlCarrito = (id) => {
+    setGuardados((prevGuardados) => {
+      const item = prevGuardados.find((g) => getId(g) === id);
+      if (!item) return prevGuardados;
+
+      // lo pasamos al carrito sumando cantidad si ya existe
+      addToCarrito(item, item.cantidad || 1);
+
+      return prevGuardados.filter((g) => getId(g) !== id);
+    });
+  };
+
+  const eliminarGuardado = (id) => {
+    setGuardados((prev) => prev.filter((g) => getId(g) !== id));
+  };
 
   return (
     <ProductosContext.Provider
@@ -134,14 +211,19 @@ export function ProductosProvider({ children }) {
         errorProductos,
 
         carrito,
+        guardados,
 
         addToCarrito,
         agregarAlCarrito,
         quitarDelCarrito,
         cambiarCantidad,
 
-        limpiarCarrito, // 👈 IMPORTANTE para tu Checkout
-        vaciarCarrito,  // alias
+        limpiarCarrito,
+        vaciarCarrito,
+
+        guardarParaDespues,
+        regresarAlCarrito,
+        eliminarGuardado,
 
         categorias,
       }}
