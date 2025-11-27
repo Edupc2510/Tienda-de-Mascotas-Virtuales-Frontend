@@ -22,17 +22,12 @@ export function UsuariosProvider({ children }) {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
-  const esAdmin = (roleOrUser) => {
-    const role =
-      typeof roleOrUser === "string" ? roleOrUser : String(roleOrUser?.role || "");
-    return role.toLowerCase().trim() === "admin";
-  };
+  const esAdmin = (u) => String(u?.role || "").toLowerCase() === "admin";
 
   // ==========================
-  // CARGAR USUARIOS Y ÓRDENES
-  // - Admin: trae TODAS las órdenes
-  // - User: trae solo sus órdenes
-  // Nota: decide admin usando el usuario real de /usuarios para evitar localStorage desfasado
+  // CARGAR USUARIOS + SINCRONIZAR usuarioLogueado Y CARGAR ÓRDENES
+  // - Admin: /ordenes (todas)
+  // - User : /ordenes?usuarioId=...
   // ==========================
   useEffect(() => {
     const fetchInicial = async () => {
@@ -47,52 +42,53 @@ export function UsuariosProvider({ children }) {
         const listaUsuarios = Array.isArray(dataU) ? dataU : [];
         setUsuarios(listaUsuarios);
 
-        // 2) Ordenes
-        const loggedId = usuarioLogueado?.id;
-        if (!loggedId) {
-          setOrdenes([]);
-          return;
-        }
+        // 2) Si hay sesión, sincroniza datos (incluye role desde BD)
+        let current = usuarioLogueado;
 
-        // usuario real desde BD (para tener role seguro)
-        const userFromDb = listaUsuarios.find((u) => String(u.id) === String(loggedId));
-        const roleFinal = userFromDb?.role ?? usuarioLogueado?.role ?? "user";
-        const adminFinal = esAdmin(roleFinal);
+        if (usuarioLogueado?.id) {
+          const uDb = listaUsuarios.find((u) => String(u.id) === String(usuarioLogueado.id));
+          if (uDb) {
+            const synced = {
+              ...usuarioLogueado,
+              nombre: uDb.nombre ?? usuarioLogueado.nombre,
+              apellido: uDb.apellido ?? usuarioLogueado.apellido,
+              email: uDb.email ?? usuarioLogueado.email,
+              role: uDb.role ?? usuarioLogueado.role,
+            };
 
-        // sincroniza usuarioLogueado si estaba incompleto/desfasado
-        if (userFromDb) {
-          const synced = {
-            id: userFromDb.id,
-            nombre: userFromDb.nombre,
-            apellido: userFromDb.apellido,
-            email: userFromDb.email,
-            role: userFromDb.role,
-          };
+            // actualiza localStorage solo si cambió algo relevante
+            const changed =
+              synced.nombre !== usuarioLogueado.nombre ||
+              synced.apellido !== usuarioLogueado.apellido ||
+              synced.email !== usuarioLogueado.email ||
+              synced.role !== usuarioLogueado.role;
 
-          const needsSync =
-            !usuarioLogueado?.role ||
-            String(usuarioLogueado.role).toLowerCase() !== String(synced.role).toLowerCase() ||
-            usuarioLogueado?.email !== synced.email ||
-            usuarioLogueado?.nombre !== synced.nombre ||
-            usuarioLogueado?.apellido !== synced.apellido;
+            if (changed) {
+              setUsuarioLogueado(synced);
+              localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
+            }
 
-          if (needsSync) {
-            setUsuarioLogueado(synced);
-            localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
+            current = synced;
           }
         }
 
-        const url = adminFinal
-          ? `${API_URL}/ordenes`
-          : `${API_URL}/ordenes?usuarioId=${loggedId}`;
+        // 3) Órdenes
+        if (current?.id) {
+          const url = esAdmin(current)
+            ? `${API_URL}/ordenes`
+            : `${API_URL}/ordenes?usuarioId=${encodeURIComponent(current.id)}`;
 
-        const resO = await fetch(url);
-        if (!resO.ok) throw new Error("Error al cargar órdenes");
-        const dataO = await resO.json();
-        setOrdenes(Array.isArray(dataO) ? dataO : []);
+          const resO = await fetch(url);
+          if (!resO.ok) throw new Error("Error al cargar órdenes");
+          const dataO = await resO.json();
+          setOrdenes(Array.isArray(dataO) ? dataO : []);
+        } else {
+          setOrdenes([]);
+        }
       } catch (err) {
         console.error(err);
         setError(err.message || "Error cargando datos");
+        setOrdenes([]);
       } finally {
         setCargando(false);
       }
@@ -227,8 +223,7 @@ export function UsuariosProvider({ children }) {
   };
 
   // ==========================
-  // CANCELAR ORDEN (DELETE /ordenes/:id)
-  // Backend: NO borra físico, solo cambia estado a "Cancelado"
+  // CANCELAR ORDEN (DELETE /ordenes/:id) => backend cambia estado a "Cancelado"
   // ==========================
   const cancelOrder = async (id) => {
     const res = await fetch(`${API_URL}/ordenes/${id}`, { method: "DELETE" });
@@ -238,23 +233,17 @@ export function UsuariosProvider({ children }) {
       throw new Error(errData.error || "Error al cancelar orden");
     }
 
-    const data = await res.json().catch(() => ({}));
+    const ordenActualizada = await res.json().catch(() => ({}));
 
     setOrdenes((prev) =>
-      prev.map((o) =>
-        o.id === id
-          ? data?.id
-            ? data
-            : { ...o, estado: "Cancelado" }
-          : o
-      )
+      prev.map((o) => (o.id === id ? (ordenActualizada?.id ? ordenActualizada : { ...o, estado: "Cancelado" }) : o))
     );
 
-    return data;
+    return ordenActualizada;
   };
 
   // ==========================
-  // ACTIVAR/DESACTIVAR USUARIO (ADMIN) - solo local
+  // ADMIN TOGGLE (solo front: si quieres real, haz endpoint)
   // ==========================
   const adminToggleUser = (id) =>
     setUsuarios((prev) =>
@@ -262,7 +251,7 @@ export function UsuariosProvider({ children }) {
     );
 
   // ==========================
-  // ACTUALIZAR USUARIO (PUT)
+  // ACTUALIZAR USUARIO
   // ==========================
   const updateUsuario = async (id, datos) => {
     const usuario = usuarios.find((u) => u.id === id);
@@ -285,6 +274,7 @@ export function UsuariosProvider({ children }) {
       prev.map((u) => (u.id === actualizado.id ? actualizado : u))
     );
 
+    // si editaste al mismo usuario logueado, sincroniza localStorage (incluye role)
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
         ...usuarioLogueado,
