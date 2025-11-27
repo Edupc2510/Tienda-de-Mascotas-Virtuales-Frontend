@@ -22,12 +22,17 @@ export function UsuariosProvider({ children }) {
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(null);
 
-  const esAdmin = (u) => String(u?.role || "").toLowerCase() === "admin";
+  const esAdmin = (roleOrUser) => {
+    const role =
+      typeof roleOrUser === "string" ? roleOrUser : String(roleOrUser?.role || "");
+    return role.toLowerCase().trim() === "admin";
+  };
 
   // ==========================
   // CARGAR USUARIOS Y ÓRDENES
-  // - si es admin: trae TODAS las órdenes
-  // - si no: solo las del usuario logueado
+  // - Admin: trae TODAS las órdenes
+  // - User: trae solo sus órdenes
+  // Nota: decide admin usando el usuario real de /usuarios para evitar localStorage desfasado
   // ==========================
   useEffect(() => {
     const fetchInicial = async () => {
@@ -35,25 +40,56 @@ export function UsuariosProvider({ children }) {
         setCargando(true);
         setError(null);
 
-        // Usuarios
+        // 1) Usuarios
         const resU = await fetch(`${API_URL}/usuarios`);
         if (!resU.ok) throw new Error("Error al cargar usuarios");
         const dataU = await resU.json();
-        setUsuarios(dataU || []);
+        const listaUsuarios = Array.isArray(dataU) ? dataU : [];
+        setUsuarios(listaUsuarios);
 
-        // Órdenes
-        if (usuarioLogueado?.id) {
-          const url = esAdmin(usuarioLogueado)
-            ? `${API_URL}/ordenes`
-            : `${API_URL}/ordenes?usuarioId=${usuarioLogueado.id}`;
-
-          const resO = await fetch(url);
-          if (!resO.ok) throw new Error("Error al cargar órdenes");
-          const dataO = await resO.json();
-          setOrdenes(dataO || []);
-        } else {
+        // 2) Ordenes
+        const loggedId = usuarioLogueado?.id;
+        if (!loggedId) {
           setOrdenes([]);
+          return;
         }
+
+        // usuario real desde BD (para tener role seguro)
+        const userFromDb = listaUsuarios.find((u) => String(u.id) === String(loggedId));
+        const roleFinal = userFromDb?.role ?? usuarioLogueado?.role ?? "user";
+        const adminFinal = esAdmin(roleFinal);
+
+        // sincroniza usuarioLogueado si estaba incompleto/desfasado
+        if (userFromDb) {
+          const synced = {
+            id: userFromDb.id,
+            nombre: userFromDb.nombre,
+            apellido: userFromDb.apellido,
+            email: userFromDb.email,
+            role: userFromDb.role,
+          };
+
+          const needsSync =
+            !usuarioLogueado?.role ||
+            String(usuarioLogueado.role).toLowerCase() !== String(synced.role).toLowerCase() ||
+            usuarioLogueado?.email !== synced.email ||
+            usuarioLogueado?.nombre !== synced.nombre ||
+            usuarioLogueado?.apellido !== synced.apellido;
+
+          if (needsSync) {
+            setUsuarioLogueado(synced);
+            localStorage.setItem("usuarioLogueado", JSON.stringify(synced));
+          }
+        }
+
+        const url = adminFinal
+          ? `${API_URL}/ordenes`
+          : `${API_URL}/ordenes?usuarioId=${loggedId}`;
+
+        const resO = await fetch(url);
+        if (!resO.ok) throw new Error("Error al cargar órdenes");
+        const dataO = await resO.json();
+        setOrdenes(Array.isArray(dataO) ? dataO : []);
       } catch (err) {
         console.error(err);
         setError(err.message || "Error cargando datos");
@@ -63,7 +99,8 @@ export function UsuariosProvider({ children }) {
     };
 
     fetchInicial();
-  }, [usuarioLogueado?.id, usuarioLogueado?.role]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuarioLogueado?.id]);
 
   // ==========================
   // REGISTRO
@@ -203,7 +240,6 @@ export function UsuariosProvider({ children }) {
 
     const data = await res.json().catch(() => ({}));
 
-    // si el backend devuelve la orden actualizada, la usamos; si no, hacemos fallback
     setOrdenes((prev) =>
       prev.map((o) =>
         o.id === id
@@ -218,7 +254,7 @@ export function UsuariosProvider({ children }) {
   };
 
   // ==========================
-  // ACTIVAR/DESACTIVAR USUARIO (ADMIN)
+  // ACTIVAR/DESACTIVAR USUARIO (ADMIN) - solo local
   // ==========================
   const adminToggleUser = (id) =>
     setUsuarios((prev) =>
@@ -226,7 +262,7 @@ export function UsuariosProvider({ children }) {
     );
 
   // ==========================
-  // ACTUALIZAR USUARIO
+  // ACTUALIZAR USUARIO (PUT)
   // ==========================
   const updateUsuario = async (id, datos) => {
     const usuario = usuarios.find((u) => u.id === id);
@@ -249,7 +285,6 @@ export function UsuariosProvider({ children }) {
       prev.map((u) => (u.id === actualizado.id ? actualizado : u))
     );
 
-    // si actualizaste al usuario logueado, refresca localStorage
     if (usuarioLogueado?.id === id) {
       const updatedLogueado = {
         ...usuarioLogueado,
